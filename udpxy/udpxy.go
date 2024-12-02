@@ -5,42 +5,50 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"regexp"
 
 	"golang.org/x/net/ipv4"
 )
 
-func StreamFromUdp(res http.ResponseWriter, req *http.Request) {
+type Udpxy struct {
+	address string
+	buffer  int
+	Int     string
+}
+
+func (upxy *Udpxy) StreamFromUdp(res http.ResponseWriter, req *http.Request) {
 	// set headers for MPEG-TS
 	res.Header().Set("Content-Type", "video/mp2t")
 	res.Header().Set("Transfer-Encoding", "chunked")
 	res.Header().Set("Connection", "keep-alive")
 	res.WriteHeader(http.StatusOK)
 
-	// connect to udp source
-	addr, err := net.ResolveUDPAddr("udp", "0.0.0.0:8208")
-	if err != nil {
-		log.Fatal(err)
+	upxy.buffer = 1500
+
+	re := regexp.MustCompile(`udp/(.+)`)
+	addressMatch := re.FindStringSubmatch(req.URL.Path)
+	if len(addressMatch) != 2 {
 		return
 	}
+	sourceAddress := addressMatch[1]
 
-	fmt.Printf("%+v \n", addr)
-
-	ifi, _ := net.InterfaceByName("eno1")
-	fmt.Printf("%+v \n", ifi)
-
-	conn, err := net.ListenPacket("udp4", "239.1.1.8:8208")
+	conn, err := net.ListenPacket("udp4", sourceAddress)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	defer conn.Close()
-
-	src := net.IPv4(239, 1, 1, 8)
-
 	packetConn := ipv4.NewPacketConn(conn)
 
-	if err := packetConn.JoinGroup(ifi, &net.UDPAddr{IP: src}); err != nil {
-		fmt.Println("Group Join Error", err)
+	var joinGroupInt *net.Interface = nil
+	if ifi, err := net.InterfaceByName(upxy.Int); err == nil {
+		joinGroupInt = ifi
+	}
+
+	sourceIP, _, _ := net.SplitHostPort(sourceAddress)
+	parsedSourceIP := net.ParseIP(sourceIP)
+	if err := packetConn.JoinGroup(joinGroupInt, &net.UDPAddr{IP: parsedSourceIP}); err != nil {
+		log.Fatal("Group Join Error", err)
 		return
 	}
 
@@ -62,7 +70,7 @@ func StreamFromUdp(res http.ResponseWriter, req *http.Request) {
 			break
 		}
 
-		if cm.Dst.Equal(src) { // check if multicast destination is the source to avoid packet duplication
+		if cm.Dst.Equal(parsedSourceIP) { // check if multicast destination is the source to avoid packet duplication
 			_, writeErr := res.Write(buffer[:n])
 			if writeErr != nil {
 				fmt.Println(writeErr)
@@ -73,3 +81,26 @@ func StreamFromUdp(res http.ResponseWriter, req *http.Request) {
 		flusher.Flush()
 	}
 }
+
+//func getInterface(intString string) *net.Interface {
+//	inif := net.ParseIP(intString)
+//
+//	ifaces, err := net.Interfaces()
+//	if err != nil {
+//		return nil
+//	}
+//
+//	for _, iface := range ifaces {
+//		if addrs, err := iface.Addrs(); err == nil {
+//			for _, addr := range addrs {
+//				if iip, _, err := net.ParseCIDR(addr.String()); err == nil {
+//					fmt.Printf("%+v %+v \n", iip, inif)
+//					if iip.Equal(inif) {
+//						return &iface
+//					}
+//				}
+//			}
+//		}
+//	}
+//	return nil
+//}

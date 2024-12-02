@@ -6,9 +6,11 @@ import (
 	"net/http"
 )
 
-func StartServer(address string, port string) {
+func StartServer(address string, port string, listenInterface string) {
 	serverPort := fmt.Sprintf("%s:%s", address, port)
-	http.HandleFunc("/stream", StreamFromUdp)
-	log.Printf("Serving MPEG-TS UDP stream on %s/stream", serverPort)
+
+	myUdpxy := &Udpxy{Int: listenInterface}
+	http.HandleFunc("/udp/{udpAddress}", myUdpxy.StreamFromUdp)
+	log.Printf("Serving MPEG-TS UDP stream on %s/udp", serverPort)
 	log.Fatal(http.ListenAndServe(serverPort, nil))
 }

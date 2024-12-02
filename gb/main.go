@@ -23,15 +23,22 @@ func main() {
 			&cli.StringFlag{
 				Name:    "address",
 				Aliases: []string{"a"},
-				Usage:   "Address to listen on.",
+				Usage:   "Address for the HTTP server listen on.",
 				Value:   "0.0.0.0",
+			},
+			&cli.StringFlag{
+				Name:        "int",
+				Aliases:     []string{"i"},
+				Usage:       "interface name to listen for network traffic on.",
+				DefaultText: "System multicast interface",
 			},
 		},
 		Action: func(c *cli.Context) error {
 			port := c.String("port")
 			address := c.String("address")
+			listenInterface := c.String("int")
 			fmt.Println("Initializing GoBetween proxy.")
-			udpxy.StartServer(address, port)
+			udpxy.StartServer(address, port, listenInterface)
 			return nil
 		},
 	}
