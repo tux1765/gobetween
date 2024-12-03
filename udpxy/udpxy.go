@@ -12,27 +12,25 @@ import (
 
 type Udpxy struct {
 	address string
-	buffer  int
+	Buffer  int
 	Int     string
 }
 
-func (upxy *Udpxy) StreamFromUdp(res http.ResponseWriter, req *http.Request) {
+func (udpxy *Udpxy) StreamFromUdp(res http.ResponseWriter, req *http.Request) {
 	// set headers for MPEG-TS
 	res.Header().Set("Content-Type", "video/mp2t")
 	res.Header().Set("Transfer-Encoding", "chunked")
 	res.Header().Set("Connection", "keep-alive")
 	res.WriteHeader(http.StatusOK)
 
-	upxy.buffer = 1500
-
 	re := regexp.MustCompile(`udp/(.+)`)
 	addressMatch := re.FindStringSubmatch(req.URL.Path)
 	if len(addressMatch) != 2 {
 		return
 	}
-	sourceAddress := addressMatch[1]
+	multicastSourceAddr := addressMatch[1]
 
-	conn, err := net.ListenPacket("udp4", sourceAddress)
+	conn, err := net.ListenPacket("udp4", multicastSourceAddr)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -41,19 +39,20 @@ func (upxy *Udpxy) StreamFromUdp(res http.ResponseWriter, req *http.Request) {
 	packetConn := ipv4.NewPacketConn(conn)
 
 	var joinGroupInt *net.Interface = nil
-	if ifi, err := net.InterfaceByName(upxy.Int); err == nil {
+	if ifi, err := net.InterfaceByName(udpxy.Int); err == nil {
 		joinGroupInt = ifi
 	}
 
-	sourceIP, _, _ := net.SplitHostPort(sourceAddress)
-	parsedSourceIP := net.ParseIP(sourceIP)
-	if err := packetConn.JoinGroup(joinGroupInt, &net.UDPAddr{IP: parsedSourceIP}); err != nil {
+	unparsedMulticastIP, _, _ := net.SplitHostPort(multicastSourceAddr)
+	parsedSourceMulticastIP := net.ParseIP(unparsedMulticastIP)
+	if err := packetConn.JoinGroup(joinGroupInt, &net.UDPAddr{IP: parsedSourceMulticastIP}); err != nil {
 		log.Fatal("Group Join Error", err)
 		return
 	}
 
 	if err := packetConn.SetControlMessage(ipv4.FlagDst, true); err != nil {
-		fmt.Println("Control message error", err)
+		log.Fatal("Control message error", err)
+		return
 	}
 
 	flusher, ok := res.(http.Flusher)
@@ -61,7 +60,7 @@ func (upxy *Udpxy) StreamFromUdp(res http.ResponseWriter, req *http.Request) {
 		http.Error(res, "Streaming not supported", http.StatusInternalServerError)
 		return
 	}
-	buffer := make([]byte, 1500)
+	buffer := make([]byte, udpxy.Buffer)
 
 	for {
 		n, cm, _, err := packetConn.ReadFrom(buffer)
@@ -70,7 +69,13 @@ func (upxy *Udpxy) StreamFromUdp(res http.ResponseWriter, req *http.Request) {
 			break
 		}
 
-		if cm.Dst.Equal(parsedSourceIP) { // check if multicast destination is the source to avoid packet duplication
+		// if int to listen on is supplied only get packets from that int
+		if joinGroupInt != nil && joinGroupInt.Index != cm.IfIndex {
+			continue
+		}
+
+		// verify multicast destination is the source
+		if cm.Dst.Equal(parsedSourceMulticastIP) {
 			_, writeErr := res.Write(buffer[:n])
 			if writeErr != nil {
 				fmt.Println(writeErr)
@@ -82,6 +87,7 @@ func (upxy *Udpxy) StreamFromUdp(res http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// TODO: implement this function to accept interface IP addresses
 //func getInterface(intString string) *net.Interface {
 //	inif := net.ParseIP(intString)
 //

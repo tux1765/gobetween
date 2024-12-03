@@ -32,13 +32,20 @@ func main() {
 				Usage:       "interface name to listen for network traffic on.",
 				DefaultText: "System multicast interface",
 			},
+			&cli.IntFlag{
+				Name:    "buffer",
+				Aliases: []string{"b"},
+				Usage:   "Buffer size for UDP packets.",
+				Value:   1500,
+			},
 		},
 		Action: func(c *cli.Context) error {
 			port := c.String("port")
 			address := c.String("address")
 			listenInterface := c.String("int")
+			packetBufferSize := c.Int("buffer")
 			fmt.Println("Initializing GoBetween proxy.")
-			udpxy.StartServer(address, port, listenInterface)
+			udpxy.StartServer(address, port, listenInterface, packetBufferSize)
 			return nil
 		},
 	}
